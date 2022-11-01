@@ -1,0 +1,249 @@
+---
+title: "LGBTQ rights Dashboard 2020"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    css: styles.css
+runtime: shiny
+
+---
+
+```{r setup, include=FALSE}
+library(rsconnect)
+library(flexdashboard)
+library(shinydashboard)
+library(shiny)
+library(readxl)
+library(tidyverse)
+library(maps)
+library(ggplot2)
+library(stringr)
+library(ggiraph)
+library(RColorBrewer)
+library(ggiraph)
+library(htmlwidgets)
+library(data.table)
+library(leaflet)
+library(DT) 
+library(rpivotTable)
+library(writexl)
+library(htmltools)
+library(RCurl)
+library(devtools)
+```
+
+
+World map 
+================================================
+
+Column {.sidebar data-width=250}
+-------------------------------------
+
+```{r}
+#Loading data for LGBTQ rights and spatial data for the map
+ILGA_data <- read.csv('data/data.csv',sep = ";", stringsAsFactors=T)
+long_lat <- read.csv("data/long_lat.csv", stringsAsFactors=T)
+
+#Renaming columns
+ILGA_data <- ILGA_data %>%
+  rename(
+         "Legality" = "CSSSA.LEGAL.",
+         "Constitutional protection" = "CONST.",
+         "Broad protection" = "BROAD.PROT.",
+         "Employment protection" = "EMPLOY.",
+         "Hate crime protection" = "HATE.CRIME",
+         "Incitement of hate crime punishment" = "INCITEMENT",
+         "Ban of conversion therapies" = "BAN.CONV..THERAPIES",
+         "Same sex marriage" = "SAME.SEX.MARRIAGE",
+         "Civil unions" = "CIVIL.UNIONS",
+         "Joint adoption" = "JOINT.ADOPTION",
+         "Second parent adoption" = "SECOND.PARENT.ADOPTION"
+  )
+
+#New columns to join by the 2 datasets in the next step
+ILGA_data["Country_NEW"]=ILGA_data["COUNTRY"]
+long_lat["Country_NEW"]=long_lat["country"]
+
+#Joining the dataset + some string manipulation previous to working with the data
+ILGA_data$Country_NEW <- str_to_lower(ILGA_data$Country_NEW)
+ILGA_data$Country_NEW <- sub("\\s*\\([^)]*\\)", "", ILGA_data$Country_NEW) #RegEx to make the names homogeneous 
+ILGA_data$Country_NEW <- str_trim(ILGA_data$Country_NEW, side = "both")
+long_lat$Country_NEW <- str_to_lower(long_lat$Country_NEW)
+long_lat$Country_NEW <- str_trim(long_lat$Country_NEW, side = "both")
+data <- inner_join(ILGA_data, long_lat, by = "Country_NEW") #joining the dataframes together
+data$Country_NEW <- str_to_upper(data$Country_NEW)
+
+#Dropping variables we don't need
+df = subset(data, select = -c(N,CN, COUNTRY, DATE.OF.DECRIM, MAX.PENALTY,usa_state_code,usa_state_latitude,usa_state_longitude,usa_state))
+
+#Melting the dataset to stacks columns into a single column of data + adding a column with country & value
+df_melt <- melt(setDT(df), id = c("Country_NEW","country", "country_code","latitude","longitude"), 
+                variable.name = "indicator", value.name = "value")
+df_melt$value<-as.factor(df_melt$value)
+df_melt$labels <- paste(df_melt$Country_NEW, df_melt$value , sep=": ")
+
+selectInput(inputId = "Indicator",
+                  label = "\n Choose the right you are interested in:",
+                  choices = unique(df_melt$indicator))
+```
+
+Row
+-------------------------------------------------
+### **LGBTQ Rights World Map 2020**
+```{r}
+
+# Create a leaflet map and change map tile using addTiles()
+list_indicators <- unique(df_melt$indicator)
+html_docs <- data.frame()
+
+
+df_melt<-df_melt %>% mutate(color_map = case_when(str_detect(value, "YES") ~ "#5f967b",
+                       str_detect(value, "NO") ~ "#D95467",
+                       str_detect(value, "LIMITED") ~ "#ECA24A",
+                       str_detect(value, "DE FACTO") ~ "#b4edd1",
+                       str_detect(value, "N/A") ~ "#EDEDED",
+                       TRUE ~ "a default"))
+filteredData <- reactive({
+    map_filtered <- df_melt %>% filter(indicator==input$Indicator)})
+
+initial_lat = 40.463667
+initial_lng = -3.749220
+initial_zoom = 3
+
+renderLeaflet({
+  leaflet(filteredData()) %>%
+  setView(lat = initial_lat, lng = initial_lng, zoom = initial_zoom) %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addCircleMarkers(
+    color = ~color_map,
+    opacity= 1,
+    stroke = TRUE, fillOpacity = 0.1,
+    lng = df_melt$longitude, lat = df_melt$latitude,
+    label = ~as.character(labels),
+    radius=7,
+    weight=1) %>%
+  addLegend("bottomright",
+              colors = c("#D95467","#5f967b", "#ECA24A", "#b4edd1","#EDEDED"),
+              labels = c("No","Yes","Limited","De facto","No Info"),
+              values = value,
+              title = "LGBTQ Rights",
+              opacity = 1)
+  })
+
+
+```
+
+
+
+Data Table
+================================================
+
+### Data Table
+```{r}
+data_table = subset(df_melt, select = -c(Country_NEW,labels,color_map,country_code))
+
+datatable(data_table,
+          caption = "LGBTQ Rights by country",
+          rownames = T,
+          filter = "top",
+          options = list(pageLength=300, scrollY='400px', scrollX=TRUE, searchHighlight=TRUE, scroller=TRUE),
+          extensions = 'Scroller')
+
+
+```
+
+
+Pivot Table & Bar Chart
+================================================
+
+### Pivot Table & Bar Chart
+
+
+Row
+-------------------------------------------------
+### Pivot Table
+
+```{r}
+data_table = subset(df_melt, select = -c(labels,color_map,country_code))
+
+rpivotTable(data_table,
+          aggregatorName = "Count",
+          cols = "value",
+          rows = "Country_NEW",
+          rendererName = "Heatmap",
+          height = "400px",
+          overflow = "scroll")
+```
+### LGBTQ Rights Chart
+
+```{r}
+
+color_table <- tibble(
+  Value = c("NO", "YES", "LIMITED", "DE FACTO", "N/A"),
+  Color = c("#D95467","#5f967b", "#ECA24A", "#b4edd1","#EDEDED")
+  )
+
+df_melt$value <- factor(df_melt$value, levels = color_table$Value)
+
+ggplot(df_melt,
+       aes(x = indicator, fill=value)) +
+      geom_bar(show.legend = TRUE)+
+      theme_minimal()+
+      theme(axis.title.x = element_blank(),
+            axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+            axis.title.y = element_blank())+
+      ggtitle("LGBTQ Rights Bar Chart")+
+      scale_fill_manual(values = color_table$Color)+
+      guides(fill= guide_legend(title = "Value"))
+
+```
+
+Project report
+================================================
+Row
+----------------------------------------------
+### Team
+*Elena García Mañes* (e.garcia-manes@mpp.hertie-school.org) found, cleaned, and transformed the dataset for the project and coded it to create an interactive world map showing how LGBTQ rights are protected in each part of the world. *Hyebin Hong* (h.hong@mpp.hertie-school.org) made a bar chart, an interactive data table, and a pivot table. 
+
+Row
+----------------------------------------------
+### Executive Summary
+How are LGBTQ rights protected in different countries? Are LGBTQ rights communities’ rights in various areas secured with the law in the country? How does the right protection vary by country? These are some the questions that we wanted to explore in our project aiming to provide insightful information on LGBTQ rights worldwide with a variety of data visualization using the Flexdashboard package in R. Our dashboard is divided into four distinct tabs that include a world map visualization, a bar chart, a data table, and a pivot table. Each dashboard has a data visualization that users can interactively engage with in exploring the data and the output. 
+
+
+Row
+----------------------------------------------
+### Interactive Dashboard
+The first dashboard is a world map representing each country’s LGBTQ rights protection or recognition by the law. Users can select in a drop-down menu the right they are interested in: green dots show where legal protection of each LGBTQ right exists, while red dots show the opposite; orange dots represent limited protection, light green where “de facto” protection exists and gray dots indicate no information on the rights. Users can zoom in and out the world map and see which country has the legal protection on LGBTQ community by simply putting the mouse cursor in a specific position or in a country.
+
+The second dashboard contains a data table with interactive elements. For example, users can choose a country or an indicator by typing it in the box or filtering the data with the arrow. The number of entries in a page can also be determined from 10 to 100. This data table can be used when user wants to figure out whether a specific right is protected in a particular country. Users can type either a full name of a country or a country code of two alphabet characters. 
+
+In the third tab users can find an interactive pivot table which users can create and see different types of tables by filtering. The default table is a heatmap that shows if the number of value is above a certain threshold, the color of the value changes. The heatmap table helps users to recognize if a country has the strong protection on LGBTQ rights by showing the number of value highlighted with colors. Right next to the pivot table a stacked bar chart allows us to see the proportion of various rights protection in the world. Users can observe which legal right is protected the most and the least at a glance. 
+
+Row
+----------------------------------------------
+### References
+
+**Data:**
+
+- Every year, along with the State-Sponsored Homophobia report, the International Lesbian, Gay, Bisexual, Trans and Intersex Association (ILGA) publishes data on sexual orientation laws in the world. We used the latest available (year 2020).
+ 
+- The dataset containing spatial data is open source and available on Kaggle: Latitude and Longitude for Every Country and State
+GPS coordinates for every world country and every USA state (2019) by Paul Mooney.
+
+**Relevant Packages:**
+- Winston Chang, Joe Cheng, JJ Allaire, Carson Sievert, Barret Schloerke, Yihui Xie, Jeff Allen, Jonathan McPherson, Alan
+  Dipert and Barbara Borges (2021). **shiny: Web Application Framework for R**. R package version 1.7.1.
+  https://CRAN.R-project.org/package=shiny
+  
+- Joe Cheng, Bhaskar Karambelkar and Yihui Xie (2021). **leaflet: Create Interactive Web Maps with the JavaScript 'Leaflet'
+  Library**. R package version 2.0.4.1. https://CRAN.R-project.org/package=leaflet
+
+- Hadley Wickham, Romain François, Lionel Henry and Kirill Müller (2021). **dplyr: A Grammar of Data Manipulation**. R
+  package version 1.0.7. https://CRAN.R-project.org/package=dplyr
+  
+- Hadley Wickham (2019). **stringr: Simple, Consistent Wrappers for Common String Operations**. R package version 1.4.0.
+  https://CRAN.R-project.org/package=stringr
+
+- H. Wickham. ggplot2: **Elegant Graphics for Data Analysis**. Springer-Verlag New York, 2016.
