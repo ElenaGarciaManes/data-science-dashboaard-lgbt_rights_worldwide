@@ -40,3 +40,6 @@ GPS coordinates for every world country and every USA state (2019) by Paul Moone
   https://CRAN.R-project.org/package=stringr
 
 - H. Wickham. ggplot2: **Elegant Graphics for Data Analysis**. Springer-Verlag New York, 2016.
+
+__*This is a sample of how the dashboard works*__
+<img width="1361" alt="dashboard_sample" src="https://user-images.githubusercontent.com/78790659/199216264-fd222410-a927-4064-a154-9735b4991285.png">
